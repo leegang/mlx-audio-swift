@@ -239,7 +239,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
             textMask: inputs.textMask,
             audioFeat: inputs.audioFeat,
             audioMask: inputs.audioMask,
-            maxLen: min(2000, generationParameters.maxTokens ?? 2000),
+            maxLen: min(256, generationParameters.maxTokens ?? 256),
             inferenceTimesteps: 5,
             cfgValue: config.ditConfig.cfmConfig.inferenceCfgRate
         )
@@ -282,7 +282,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
                     textMask: inputs.textMask,
                     audioFeat: inputs.audioFeat,
                     audioMask: inputs.audioMask,
-                    maxLen: 2000,
+                    maxLen: min(256, generationParameters.maxTokens ?? 256),
                     inferenceTimesteps: 10,
                     cfgValue: self.config.ditConfig.cfmConfig.inferenceCfgRate,
                     streamingPrefixLen: streamPrefixLen
@@ -496,7 +496,9 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
 
             let stopLogits = stopHead(stopProj(lmHidden))
             let stopFlag = MLX.argMax(stopLogits, axis: -1).item(Int.self)
+            print("[VoxCPM2] stopLogits shape: \(stopLogits.shape), stopFlag: \(stopFlag)")
             if stopFlag == 1 {
+                print("[VoxCPM2] Stop predictor triggered at patch \(i)")
                 break
             }
 
