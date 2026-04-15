@@ -15,3 +15,4 @@ xcuserdata/*
 *.xcuserdatad/xcdebugger/Breakpoints_v2.xcbkptlist
 .tmp/
 audit-repo/
+default.metallib

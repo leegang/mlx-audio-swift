@@ -76,6 +76,8 @@ public enum TTS {
             return try await KokoroModel.fromPretrained(modelRepo, textProcessor: processor, cache: cache)
         case "omnivoice":
             return try await OmniVoiceModel.fromPretrained(modelRepo, cache: cache)
+        case "voxcpm2", "voxcpm":
+            return try await VoxCPM2Model.fromPretrained(modelRepo, cache: cache)
         default:
             throw TTSModelError.unsupportedModelType(modelType ?? resolvedType)
         }
@@ -134,6 +136,9 @@ public enum TTS {
         }
         if lower.contains("omnivoice") {
             return "omnivoice"
+        }
+        if lower.contains("voxcpm2") || lower.contains("voxcpm") {
+            return "voxcpm2"
         }
         return nil
     }
