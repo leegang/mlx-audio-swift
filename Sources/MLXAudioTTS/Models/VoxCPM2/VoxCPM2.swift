@@ -239,7 +239,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
             textMask: inputs.textMask,
             audioFeat: inputs.audioFeat,
             audioMask: inputs.audioMask,
-            maxLen: min(2000, generationParameters.maxTokens),
+            maxLen: min(2000, generationParameters.maxTokens ?? 2000),
             inferenceTimesteps: 5,
             cfgValue: config.ditConfig.cfmConfig.inferenceCfgRate
         )
