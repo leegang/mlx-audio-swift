@@ -8,7 +8,7 @@ import MLXFast
 private func sinusoidalPosEmb(_ x: MLXArray, dim: Int, scale: Float = 1000) -> MLXArray {
     precondition(dim % 2 == 0, "SinusoidalPosEmb requires dim to be even")
     let halfDim = dim / 2
-    let emb = log(10000.0) / Float(halfDim - 1)
+    let emb = log(10000.0 as Float) / Float(halfDim - 1)
     let freqs = MLX.exp(MLXArray(0 ..< halfDim).asType(.float32) * (-emb))
     var y = x
     if y.ndim < 1 {
@@ -92,10 +92,10 @@ public final class VoxCPM2DiT: Module {
         let prefix = cond.dim(2)
 
         // Project inputs: [N, C, T] -> [N, T, hidden]
-        var xProj = inProj(x.transposed(1, 2))
+        var xProj = inProj(swappedAxes(x, 1, 2))
 
         // Project condition: [N, C, T_cond] -> [N, T_cond, hidden]
-        let condProjVal = condProj(cond.transposed(1, 2))
+        let condProjVal = condProj(swappedAxes(cond, 1, 2))
 
         // Timestep embeddings
         var tEmb = sinusoidalPosEmb(t, dim: config.hiddenSize)
@@ -119,6 +119,6 @@ public final class VoxCPM2DiT: Module {
 
         // Output projection and transpose back
         hidden = outProj(hidden)  // [N, T, C]
-        return hidden.transposed(1, 2)  // [N, C, T]
+        return swappedAxes(hidden, 1, 2)  // [N, C, T]
     }
 }

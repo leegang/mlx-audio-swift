@@ -106,7 +106,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
             hiddenLayers: config.encoderConfig.numLayers,
             intermediateSize: config.encoderConfig.ffnDim,
             attentionHeads: config.encoderConfig.numHeads,
-            kvHeads: config.encoderConfig.numHeads,
+            kvHeads: config.lmConfig.numKeyValueHeads,
             headDim: config.encoderConfig.kvChannels ?? (config.encoderConfig.hiddenDim / config.encoderConfig.numHeads),
             vocabularySize: 0,
             rmsNormEps: config.lmConfig.rmsNormEps,
@@ -128,7 +128,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
             hiddenLayers: config.ditConfig.numLayers,
             intermediateSize: config.ditConfig.ffnDim,
             attentionHeads: config.ditConfig.numHeads,
-            kvHeads: config.ditConfig.numHeads,
+            kvHeads: config.lmConfig.numKeyValueHeads,
             headDim: config.ditConfig.kvChannels ?? (config.ditConfig.hiddenDim / config.ditConfig.numHeads),
             vocabularySize: 0,
             rmsNormEps: config.lmConfig.rmsNormEps,
@@ -483,11 +483,11 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
                 mu: ditHidden,
                 nTimesteps: inferenceTimesteps,
                 patchSize: P,
-                cond: prefixFeatCond.transposed(1, 2),
+                cond: swappedAxes(prefixFeatCond, 1, 2),
                 cfgValue: cfgValue,
                 temperature: 1.0,
                 swaySamplingCoef: 1.0
-            ).transposed(1, 2) // [B, P, D]
+            ).swappedAxes(1, 2) // [B, P, D]
 
             let currEmbed = encToLMProj(featEncoder(predFeat.expandedDimensions(axis: 1)))
 
