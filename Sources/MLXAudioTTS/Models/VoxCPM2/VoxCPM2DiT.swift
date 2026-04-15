@@ -104,17 +104,18 @@ public final class VoxCPM2DiT: Module {
         dtEmb = deltaTimeMLP(dtEmb)
         tEmb = tEmb + dtEmb
 
-        // mu: [N, hidden] -> [N, 1, hidden]
-        let muView = mu.reshaped([N, 1, config.hiddenSize])
+        // mu: [N, hidden*muChannels] -> [N, muChannels, hidden]
+        let muChannels = mu.dim(-1) / config.hiddenSize
+        let muView = mu.reshaped([N, muChannels, config.hiddenSize])
 
         // Concatenate: [mu, t, cond, x]
         let seq = MLX.concatenated([muView, tEmb.expandedDimensions(axis: 1), condProjVal, xProj], axis: 1)
 
         // Non-causal transformer
-        var hidden = decoder(seq, mask: .none)  // [N, 1+1+T_cond+T, hidden]
+        var hidden = decoder(seq, mask: .none)  // [N, muChannels+1+T_cond+T, hidden]
 
         // Slice off prefix tokens (mu + t + cond)
-        let startIdx = prefix + 2
+        let startIdx = prefix + 1 + muChannels
         hidden = hidden[0..., startIdx..., 0...]  // [N, T, hidden]
 
         // Output projection and transpose back

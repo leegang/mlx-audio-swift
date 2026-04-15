@@ -36,6 +36,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
 
     // Stop predictor
     @ModuleInfo(key: "stop_proj") private var stopProj: Linear
+    @ModuleInfo(key: "stop_actn") private var stopActn: SiLU
     @ModuleInfo(key: "stop_head") private var stopHead: Linear
 
     public var tokenizer: Tokenizer?
@@ -186,6 +187,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
             outputDimensions: config.lmConfig.hiddenSize,
             bias: true
         )
+        self._stopActn.wrappedValue = SiLU()
         self._stopHead.wrappedValue = Linear(
             inputDimensions: config.lmConfig.hiddenSize,
             outputDimensions: 2,
@@ -234,12 +236,15 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
     ) async throws -> MLXArray {
         let inputs = try prepareGenerationInputs(text: text, refAudio: refAudio)
 
+        let estimatedMaxLen = min(2000, inputs.textTokenCount * 6 + 10)
+        let inferenceMaxLen = min(estimatedMaxLen, generationParameters.maxTokens ?? estimatedMaxLen)
+
         let result = try inference(
             textToken: inputs.textToken,
             textMask: inputs.textMask,
             audioFeat: inputs.audioFeat,
             audioMask: inputs.audioMask,
-            maxLen: min(256, generationParameters.maxTokens ?? 256),
+            maxLen: inferenceMaxLen,
             inferenceTimesteps: 5,
             cfgValue: config.ditConfig.cfmConfig.inferenceCfgRate
         )
@@ -277,12 +282,16 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
                 var previousDecodedSamples: Int = 0
                 var hasYielded = false
 
+                let estimatedMaxLen = min(2000, inputs.textTokenCount * 6 + 10)
+                let streamMaxLen = min(estimatedMaxLen, generationParameters.maxTokens ?? estimatedMaxLen)
+                print("[VoxCPM2] textTokenCount=\(inputs.textTokenCount), estimatedMaxLen=\(estimatedMaxLen), streamMaxLen=\(streamMaxLen)")
+
                 try self.inferenceStream(
                     textToken: inputs.textToken,
                     textMask: inputs.textMask,
                     audioFeat: inputs.audioFeat,
                     audioMask: inputs.audioMask,
-                    maxLen: min(256, generationParameters.maxTokens ?? 256),
+                    maxLen: streamMaxLen,
                     inferenceTimesteps: 10,
                     cfgValue: self.config.ditConfig.cfmConfig.inferenceCfgRate,
                     streamingPrefixLen: streamPrefixLen
@@ -318,7 +327,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
 
                 let generateTime = Date().timeIntervalSince(generateStartTime)
                 let info = AudioGenerationInfo(
-                    promptTokenCount: inputs.textToken.dim(1),
+                    promptTokenCount: inputs.textTokenCount,
                     generationTokenCount: tokenCount,
                     prefillTime: prefillTime,
                     generateTime: generateTime,
@@ -344,6 +353,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
         let textMask: MLXArray
         let audioFeat: MLXArray
         let audioMask: MLXArray
+        let textTokenCount: Int
     }
 
     private func prepareGenerationInputs(text: String, refAudio: MLXArray?) throws -> GenerationInputs {
@@ -385,7 +395,8 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
             textToken: textToken.expandedDimensions(axis: 0),
             textMask: textMask.expandedDimensions(axis: 0).asType(.float32),
             audioFeat: audioFeat.expandedDimensions(axis: 0),
-            audioMask: audioMask.expandedDimensions(axis: 0).asType(.float32)
+            audioMask: audioMask.expandedDimensions(axis: 0).asType(.float32),
+            textTokenCount: targetTextTokens.count
         )
     }
 
@@ -473,11 +484,15 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
         )
         var residualHidden = residualOutputs[0..., -1, 0...]
 
+        let minLen = 2
         for i in 0..<maxLen {
             if i % 5 == 0 {
                 print("[VoxCPM2] Generating patch \(i)/\(maxLen)...")
             }
-            let ditHidden = lmToDitProj(lmHidden) + resToDitProj(residualHidden)
+            let ditHidden = MLX.concatenated(
+                [lmToDitProj(lmHidden), resToDitProj(residualHidden)],
+                axis: -1
+            )
 
             let predFeat = featDecoder.generate(
                 mu: ditHidden,
@@ -494,22 +509,21 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
             onPatch(predFeat.expandedDimensions(axis: 1)) // [B, 1, P, D]
             prefixFeatCond = predFeat
 
+            // Stop predictor runs on FSQ'd lmHidden from previous step (or prefill)
+            let stopLogits = stopHead(stopActn(stopProj(lmHidden)))
+            let stopFlag = MLX.argMax(stopLogits, axis: -1).item(Int.self)
+            print("[VoxCPM2] patch \(i) ditHidden=\(ditHidden.shape) lmHiddenMean=\(lmHidden.mean().item(Float.self)) stopLogits=\(stopLogits) stopFlag=\(stopFlag)")
+            if i > minLen && stopFlag == 1 {
+                print("[VoxCPM2] Stop predictor triggered at patch \(i)")
+                break
+            }
+
             let baseOut = baseLM.forwardWithEmbeddings(
                 inputsEmbeds: currEmbed,
                 cache: baseCache,
                 mask: .none
             )
-            let lmHiddenBeforeFSQ = baseOut.squeezed(axis: 1)
-
-            let stopLogits = stopHead(stopProj(lmHiddenBeforeFSQ))
-            let stopFlag = MLX.argMax(stopLogits, axis: -1).item(Int.self)
-            print("[VoxCPM2] stopLogits shape: \(stopLogits.shape), stopFlag: \(stopFlag)")
-            if stopFlag == 1 {
-                print("[VoxCPM2] Stop predictor triggered at patch \(i)")
-                break
-            }
-
-            lmHidden = fsqLayer(lmHiddenBeforeFSQ)
+            lmHidden = fsqLayer(baseOut.squeezed(axis: 1))
 
             let residualInput = fusionConcatProj(
                 MLX.concatenated([lmHidden.expandedDimensions(axis: 1), currEmbed], axis: -1)
