@@ -174,17 +174,17 @@ private final class CausalEncoderBlock: Module, UnaryLayer {
             padding: (stride + 1) / 2,
             outputPadding: stride % 2
         )
-        self._res1.wrappedValue = CausalResidualUnit(dim: outputDim, dilation: 1, groups: groups)
-        self._res2.wrappedValue = CausalResidualUnit(dim: outputDim, dilation: 3, groups: groups)
-        self._res3.wrappedValue = CausalResidualUnit(dim: outputDim, dilation: 9, groups: groups)
+        self._res1.wrappedValue = CausalResidualUnit(dim: inDim, dilation: 1, groups: groups)
+        self._res2.wrappedValue = CausalResidualUnit(dim: inDim, dilation: 3, groups: groups)
+        self._res3.wrappedValue = CausalResidualUnit(dim: inDim, dilation: 9, groups: groups)
     }
 
     func callAsFunction(_ x: MLXArray) -> MLXArray {
         var h = snake(x)
-        h = conv(h)
         h = res1(h)
         h = res2(h)
         h = res3(h)
+        h = conv(h)
         return h
     }
 }
