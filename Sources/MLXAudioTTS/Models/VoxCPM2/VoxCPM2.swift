@@ -494,7 +494,14 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
             onPatch(predFeat.expandedDimensions(axis: 1)) // [B, 1, P, D]
             prefixFeatCond = predFeat
 
-            let stopLogits = stopHead(stopProj(lmHidden))
+            let baseOut = baseLM.forwardWithEmbeddings(
+                inputsEmbeds: currEmbed,
+                cache: baseCache,
+                mask: .none
+            )
+            let lmHiddenBeforeFSQ = baseOut.squeezed(axis: 1)
+
+            let stopLogits = stopHead(stopProj(lmHiddenBeforeFSQ))
             let stopFlag = MLX.argMax(stopLogits, axis: -1).item(Int.self)
             print("[VoxCPM2] stopLogits shape: \(stopLogits.shape), stopFlag: \(stopFlag)")
             if stopFlag == 1 {
@@ -502,13 +509,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
                 break
             }
 
-            let baseOut = baseLM.forwardWithEmbeddings(
-                inputsEmbeds: currEmbed,
-                cache: baseCache,
-                mask: .none
-            )
-            lmHidden = baseOut.squeezed(axis: 1)
-            lmHidden = fsqLayer(lmHidden)
+            lmHidden = fsqLayer(lmHiddenBeforeFSQ)
 
             let residualInput = fusionConcatProj(
                 MLX.concatenated([lmHidden.expandedDimensions(axis: 1), currEmbed], axis: -1)
