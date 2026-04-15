@@ -22,9 +22,25 @@ private final class Snake1d: Module, UnaryLayer {
     }
 }
 
+// MARK: - NCL Convolutions (MLXNN Conv1d expects NLC; VoxCPM2 uses NCL like PyTorch)
+
+private class NCLConv1d: Conv1d {
+    override func callAsFunction(_ x: MLXArray) -> MLXArray {
+        let y = super.callAsFunction(swappedAxes(x, 1, 2))
+        return swappedAxes(y, 1, 2)
+    }
+}
+
+private class NCLConvTransposed1d: ConvTransposed1d {
+    override func callAsFunction(_ x: MLXArray) -> MLXArray {
+        let y = super.callAsFunction(swappedAxes(x, 1, 2))
+        return swappedAxes(y, 1, 2)
+    }
+}
+
 // MARK: - Causal Convolutions
 
-private final class CausalConv1dLayer: Conv1d {
+private final class CausalConv1dLayer: NCLConv1d {
     let leftPad: Int
 
     init(
@@ -54,14 +70,14 @@ private final class CausalConv1dLayer: Conv1d {
     override func callAsFunction(_ x: MLXArray) -> MLXArray {
         var xPadded = x
         if leftPad > 0 {
-            let padWidths: [IntOrPair] = [0, 0, 0, 0, IntOrPair(integerLiteral: leftPad), 0]
+            let padWidths: [IntOrPair] = [0, 0, IntOrPair((leftPad, 0))]
             xPadded = padded(xPadded, widths: padWidths)
         }
         return super.callAsFunction(xPadded)
     }
 }
 
-private final class CausalConvTranspose1dLayer: ConvTransposed1d {
+private final class CausalConvTranspose1dLayer: NCLConvTransposed1d {
     let leftTrim: Int
 
     override init(
@@ -156,9 +172,9 @@ private final class CausalEncoderBlock: Module, UnaryLayer {
             padding: (stride + 1) / 2,
             outputPadding: stride % 2
         )
-        self._res1.wrappedValue = CausalResidualUnit(dim: inDim, dilation: 1, groups: groups)
-        self._res2.wrappedValue = CausalResidualUnit(dim: inDim, dilation: 3, groups: groups)
-        self._res3.wrappedValue = CausalResidualUnit(dim: inDim, dilation: 9, groups: groups)
+        self._res1.wrappedValue = CausalResidualUnit(dim: outputDim, dilation: 1, groups: groups)
+        self._res2.wrappedValue = CausalResidualUnit(dim: outputDim, dilation: 3, groups: groups)
+        self._res3.wrappedValue = CausalResidualUnit(dim: outputDim, dilation: 9, groups: groups)
     }
 
     func callAsFunction(_ x: MLXArray) -> MLXArray {
@@ -250,7 +266,7 @@ private final class SampleRateConditionLayer: Module {
     @ModuleInfo(key: "scale_embed") var scaleEmbed: Embedding?
     @ModuleInfo(key: "bias_embed") var biasEmbed: Embedding?
     @ModuleInfo(key: "cond_embed") var condEmbed: Embedding?
-    @ModuleInfo(key: "out_layer") var outLayer: Conv1d?
+    @ModuleInfo(key: "out_layer") var outLayer: NCLConv1d?
 
     init(
         inputDim: Int,
@@ -279,7 +295,7 @@ private final class SampleRateConditionLayer: Module {
         }
 
         if outLayer {
-            self._outLayer.wrappedValue = Conv1d(
+            self._outLayer.wrappedValue = NCLConv1d(
                 inputChannels: condType == "concat" ? inputDim + condDim : inputDim,
                 outputChannels: inputDim,
                 kernelSize: 1
@@ -293,14 +309,14 @@ private final class SampleRateConditionLayer: Module {
         var y = x
         switch condType {
         case "scale_bias", "scale_bias_init":
-            let scale = scaleEmbed!(srCond).transposed(0, 1).expandedDimensions(axis: -1)
-            let bias = biasEmbed!(srCond).transposed(0, 1).expandedDimensions(axis: -1)
+            let scale = scaleEmbed!(srCond).reshaped([1, -1, 1])
+            let bias = biasEmbed!(srCond).reshaped([1, -1, 1])
             y = y * scale + bias
         case "add":
-            let emb = condEmbed!(srCond).transposed(0, 1).expandedDimensions(axis: -1)
+            let emb = condEmbed!(srCond).reshaped([1, -1, 1])
             y = y + emb
         case "concat":
-            let emb = condEmbed!(srCond).transposed(0, 1).expandedDimensions(axis: -1)
+            let emb = condEmbed!(srCond).reshaped([1, -1, 1])
             let embTiled = MLX.broadcast(emb, to: [1, emb.dim(1), x.dim(-1)])
             y = MLX.concatenated([y, embTiled], axis: 1)
         default:
@@ -321,7 +337,7 @@ public final class CausalEncoder: Module {
 
     @ModuleInfo(key: "conv_in") fileprivate var convIn: CausalConv1dLayer
     @ModuleInfo(key: "blocks") fileprivate var blocks: CausalEncoderBlocks
-    @ModuleInfo(key: "fc_mu") fileprivate var fcMu: Conv1d
+    @ModuleInfo(key: "fc_mu") fileprivate var fcMu: NCLConv1d
 
     public init(
         dModel: Int = 64,
@@ -353,13 +369,12 @@ public final class CausalEncoder: Module {
         self._blocks.wrappedValue = CausalEncoderBlocks(layers: blockList)
         self.encDim = currentDim
 
-        let groups = depthwise ? currentDim : 1
-        self._fcMu.wrappedValue = Conv1d(
+        self._fcMu.wrappedValue = NCLConv1d(
             inputChannels: currentDim,
             outputChannels: latentDim,
             kernelSize: 3,
             padding: 1,
-            groups: groups
+            groups: 1
         )
     }
 
@@ -382,7 +397,7 @@ public final class CausalDecoder: Module {
     @ModuleInfo(key: "conv_in") fileprivate var convIn: Sequential
     @ModuleInfo(key: "blocks") fileprivate var blocks: CausalDecoderBlocks
     @ModuleInfo(key: "snake_out") fileprivate var snakeOut: Snake1d
-    @ModuleInfo(key: "conv_out") fileprivate var convOut: Conv1d
+    @ModuleInfo(key: "conv_out") fileprivate var convOut: NCLConv1d
     @ModuleInfo(key: "sr_cond_layers") fileprivate var srCondLayers: [SampleRateConditionLayer?]
 
     public init(
@@ -412,7 +427,7 @@ public final class CausalDecoder: Module {
                 padding: 3,
                 groups: inputChannel
             ) as any UnaryLayer)
-            convInLayers.append(Conv1d(
+            convInLayers.append(NCLConv1d(
                 inputChannels: inputChannel,
                 outputChannels: channels,
                 kernelSize: 1
@@ -444,7 +459,7 @@ public final class CausalDecoder: Module {
 
         let finalOutputDim = channels / (1 << rates.count)
         self._snakeOut.wrappedValue = Snake1d(channels: finalOutputDim)
-        self._convOut.wrappedValue = Conv1d(
+        self._convOut.wrappedValue = NCLConv1d(
             inputChannels: finalOutputDim,
             outputChannels: dOut,
             kernelSize: 7,
@@ -568,7 +583,7 @@ public final class VoxCPM2AudioVAE: Module {
         let padTo = hopLength
         let rightPad = ((length + padTo - 1) / padTo) * padTo - length
         if rightPad > 0 {
-            let padWidths: [IntOrPair] = [0, 0, 0, 0, 0, IntOrPair(integerLiteral: rightPad)]
+            let padWidths: [IntOrPair] = [0, 0, IntOrPair((0, rightPad))]
             return padded(audio, widths: padWidths)
         }
         return audio
