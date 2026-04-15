@@ -474,10 +474,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
         var residualHidden = residualOutputs[0..., -1, 0...]
 
         for _ in 0..<maxLen {
-            let ditHidden = MLX.concatenated([
-                lmToDitProj(lmHidden),
-                resToDitProj(residualHidden)
-            ], axis: -1)
+            let ditHidden = lmToDitProj(lmHidden) + resToDitProj(residualHidden)
 
             let predFeat = featDecoder.generate(
                 mu: ditHidden,
