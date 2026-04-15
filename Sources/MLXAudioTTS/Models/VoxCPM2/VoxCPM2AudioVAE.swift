@@ -14,11 +14,13 @@ private final class Snake1d: Module, UnaryLayer {
     let alpha: MLXArray
 
     init(channels: Int) {
-        self.alpha = MLXArray.ones([1, channels, 1])
+        // Checkpoint stores alpha as (1, 1, C); snake operates on NLC internally.
+        self.alpha = MLXArray.ones([1, 1, channels])
     }
 
     func callAsFunction(_ x: MLXArray) -> MLXArray {
-        snakeActivation(x, alpha: alpha)
+        let y = snakeActivation(swappedAxes(x, 1, 2), alpha: alpha)
+        return swappedAxes(y, 1, 2)
     }
 }
 
@@ -381,7 +383,8 @@ public final class CausalEncoder: Module {
     public func callAsFunction(_ x: MLXArray) -> MLXArray {
         var h = convIn(x)
         h = blocks(h)
-        return snakeActivation(fcMu(h), alpha: MLXArray.ones([1, latentDim, 1]))
+        let y = snakeActivation(swappedAxes(fcMu(h), 1, 2), alpha: MLXArray.ones([1, 1, latentDim]))
+        return swappedAxes(y, 1, 2)
     }
 }
 
