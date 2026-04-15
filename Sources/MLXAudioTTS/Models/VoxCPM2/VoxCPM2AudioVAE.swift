@@ -359,7 +359,7 @@ public final class CausalEncoder: Module {
         var currentDim = dModel
         for stride in strides {
             let outDim = currentDim * 2
-            let groups = depthwise ? (currentDim / 2) : 1
+            let groups = depthwise ? currentDim : 1
             blockList.append(CausalEncoderBlock(
                 outputDim: outDim,
                 inputDim: currentDim,
