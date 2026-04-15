@@ -239,8 +239,8 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
             textMask: inputs.textMask,
             audioFeat: inputs.audioFeat,
             audioMask: inputs.audioMask,
-            maxLen: 2000,
-            inferenceTimesteps: 10,
+            maxLen: min(2000, generationParameters.maxTokens),
+            inferenceTimesteps: 5,
             cfgValue: config.ditConfig.cfmConfig.inferenceCfgRate
         )
 
@@ -473,7 +473,10 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
         )
         var residualHidden = residualOutputs[0..., -1, 0...]
 
-        for _ in 0..<maxLen {
+        for i in 0..<maxLen {
+            if i % 5 == 0 {
+                print("[VoxCPM2] Generating patch \(i)/\(maxLen)...")
+            }
             let ditHidden = lmToDitProj(lmHidden) + resToDitProj(residualHidden)
 
             let predFeat = featDecoder.generate(
