@@ -49,6 +49,10 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
 
     public var sampleRate: Int { config.sampleRate }
 
+    /// Override this before calling `generate()` to tune speed vs quality.
+    /// Default is read from `config.ditConfig.cfmConfig.inferenceTimesteps`.
+    public var inferenceTimesteps: Int
+
     public var defaultGenerationParameters: GenerateParameters {
         GenerateParameters(
             maxTokens: 4096,
@@ -60,6 +64,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
 
     public init(config: VoxCPM2Config) throws {
         self.config = config
+        self.inferenceTimesteps = config.ditConfig.cfmConfig.inferenceTimesteps
 
         // Base LM: 28-layer MiniCPM4
         let baseConfig = MiniCPM4Configuration(
@@ -245,7 +250,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
             audioFeat: inputs.audioFeat,
             audioMask: inputs.audioMask,
             maxLen: inferenceMaxLen,
-            inferenceTimesteps: 5,
+            inferenceTimesteps: self.inferenceTimesteps,
             cfgValue: config.ditConfig.cfmConfig.inferenceCfgRate
         )
 
@@ -292,7 +297,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
                     audioFeat: inputs.audioFeat,
                     audioMask: inputs.audioMask,
                     maxLen: streamMaxLen,
-                    inferenceTimesteps: 10,
+                    inferenceTimesteps: self.inferenceTimesteps,
                     cfgValue: self.config.ditConfig.cfmConfig.inferenceCfgRate,
                     streamingPrefixLen: streamPrefixLen
                 ) { patchFeat in
@@ -486,7 +491,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
 
         let minLen = 2
         for i in 0..<maxLen {
-            if i % 5 == 0 {
+            if i % 50 == 0 {
                 print("[VoxCPM2] Generating patch \(i)/\(maxLen)...")
             }
             let ditHidden = MLX.concatenated(
@@ -512,7 +517,6 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
             // Stop predictor runs on FSQ'd lmHidden from previous step (or prefill)
             let stopLogits = stopHead(stopActn(stopProj(lmHidden)))
             let stopFlag = MLX.argMax(stopLogits, axis: -1).item(Int.self)
-            print("[VoxCPM2] patch \(i) ditHidden=\(ditHidden.shape) lmHiddenMean=\(lmHidden.mean().item(Float.self)) stopLogits=\(stopLogits) stopFlag=\(stopFlag)")
             if i > minLen && stopFlag == 1 {
                 print("[VoxCPM2] Stop predictor triggered at patch \(i)")
                 break

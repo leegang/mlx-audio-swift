@@ -114,12 +114,14 @@ public struct VoxCPM2CFMConfig: Codable, Sendable {
     public var solver: String
     public var tScheduler: String
     public var inferenceCfgRate: Float
+    public var inferenceTimesteps: Int
 
     enum CodingKeys: String, CodingKey {
         case sigmaMin = "sigma_min"
         case solver
         case tScheduler = "t_scheduler"
         case inferenceCfgRate = "inference_cfg_rate"
+        case inferenceTimesteps = "inference_timesteps"
     }
 
     public init(from decoder: Swift.Decoder) throws {
@@ -128,6 +130,7 @@ public struct VoxCPM2CFMConfig: Codable, Sendable {
         solver = try c.decodeIfPresent(String.self, forKey: .solver) ?? "euler"
         tScheduler = try c.decodeIfPresent(String.self, forKey: .tScheduler) ?? "log-norm"
         inferenceCfgRate = try c.decodeIfPresent(Float.self, forKey: .inferenceCfgRate) ?? 2.0
+        inferenceTimesteps = try c.decodeIfPresent(Int.self, forKey: .inferenceTimesteps) ?? 5
     }
 }
 
